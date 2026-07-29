@@ -1,0 +1,326 @@
+// =============================================================================
+// Unseat — Prisma Schema
+// PostgreSQL · NextAuth Prisma Adapter · Railway deployment
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================================================
+// AUTH — NextAuth Prisma Adapter standard models
+// https://authjs.dev/getting-started/adapters/prisma
+//
+// IMPORTANT: The adapter hardcodes prisma.session.* and prisma.account.*
+// method calls internally. These model names MUST stay as User, Account,
+// Session, and VerificationToken — renaming them breaks the adapter.
+//
+// To avoid collision with WorkSession (the exercise scheduler model below),
+// the workout table is mapped to "work_sessions" via @@map, while the Prisma
+// model name stays WorkSession. This gives us:
+//   prisma.session     → NextAuth auth sessions  (table: sessions)
+//   prisma.workSession → corrective exercise jobs (table: work_sessions)
+// =============================================================================
+
+model User {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  name           String?
+  image          String?
+  emailVerified  DateTime? // required by NextAuth adapter
+  onboardingDone Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+
+  // Auth (NextAuth managed)
+  accounts Account[]
+  sessions Session[]
+
+  // App
+  goals        UserGoal[]
+  availability Availability[]
+  assessments  Assessment[]
+  plan         ExercisePlan?
+  workSessions WorkSession[]
+}
+
+// Stores OAuth provider tokens per provider.
+// NextAuth manages token refresh via this table automatically.
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type              String  // "oauth"
+  provider          String  // "google"
+  providerAccountId String
+
+  // OAuth token fields — Text to accommodate long JWT values
+  access_token  String?  @db.Text
+  refresh_token String?  @db.Text
+  expires_at    Int?     // unix timestamp
+  token_type    String?
+  scope         String?  // includes https://www.googleapis.com/auth/calendar.events
+  id_token      String?  @db.Text
+  session_state String?
+
+  @@unique([provider, providerAccountId])
+}
+
+// NextAuth database session — model name must remain "Session".
+// See note above re: adapter hardcoding.
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expires      DateTime
+
+  @@map("sessions")
+}
+
+// Required by NextAuth adapter — table must exist even if email sign-in unused.
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// =============================================================================
+// ONBOARDING
+// =============================================================================
+
+enum Goal {
+  IMPROVE_MOBILITY
+  REDUCE_STIFFNESS
+  IMPROVE_POSTURE
+  INCREASE_DAILY_MOVEMENT
+  IMPROVE_ENERGY
+}
+
+// One row per goal per user. Stored relationally for clean querying.
+// UI allows selecting 1–3 goals during onboarding.
+model UserGoal {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  goal   Goal
+
+  @@unique([userId, goal])
+  @@index([userId])
+}
+
+// Weekly availability windows used by the scheduler.
+// Multiple rows per user — one per available time block.
+// Scheduler places sessions at the START of a window, leaving remainder free.
+model Availability {
+  id        String @id @default(cuid())
+  userId    String
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dayOfWeek Int    // 0 = Sunday … 6 = Saturday
+  startTime String // "07:00" — 24h HH:MM
+  endTime   String // "08:30" — scheduler respects this ceiling
+
+  @@index([userId])
+}
+
+// =============================================================================
+// ASSESSMENT
+//
+// OHSA compensation answers → DysfunctionType (deterministic, no AI).
+//
+// Mapping rationale (NASM CPT Corrective Exercise Continuum):
+//
+//   PRONATION_DISTORTION
+//     Signs: kneesCaveIn, feetTurnOut
+//     Overactive:  peroneals, lateral gastroc, TFL, adductors
+//     Underactive: glute med/max, tibialis anterior/posterior, VMO
+//
+//   LOWER_CROSSED
+//     Signs: excessiveLeanForward, heelsRise, lowBackArches
+//     NOTE: forward lean during OHSA implicates hip flexor tightness and/or
+//     ankle dorsiflexion restriction — NOT upper crossed syndrome.
+//     Overactive:  iliopsoas, rectus femoris, thoracolumbar extensors, soleus
+//     Underactive: glute max, hamstrings, deep core (TA, multifidus)
+//
+//   UPPER_CROSSED
+//     Signs: armsFallForward (arms drop below ear during overhead reach)
+//     Overactive:  pec major/minor, upper trap, levator scapulae, SCM
+//     Underactive: deep cervical flexors, lower trap, serratus anterior
+//
+//   NONE
+//     No compensations noted → general mobility plan.
+//
+//   Priority when multiple patterns co-occur:
+//     UPPER_CROSSED > LOWER_CROSSED > PRONATION_DISTORTION
+// =============================================================================
+
+enum DysfunctionType {
+  UPPER_CROSSED        // arms fall forward during overhead squat reach
+  LOWER_CROSSED        // excessive forward lean, heels rise, or low back arches
+  PRONATION_DISTORTION // feet turn out or knees cave inward
+  NONE                 // no compensations observed
+}
+
+model Assessment {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // R2 object key. Nullable — video upload is entirely optional.
+  // The assessment and plan generation work without it.
+  videoUrl String?
+
+  // OHSA compensation answers.
+  // Shape: {
+  //   kneesCaveIn:           boolean
+  //   feetTurnOut:           boolean
+  //   armsFallForward:       boolean
+  //   excessiveLeanForward:  boolean
+  //   heelsRise:             boolean
+  //   lowBackArches:         boolean
+  // }
+  answers Json
+
+  dysfunctionType DysfunctionType
+  completedAt     DateTime        @default(now())
+
+  plan ExercisePlan?
+
+  @@index([userId])
+}
+
+// =============================================================================
+// EXERCISE LIBRARY
+//
+// Single source of truth for all corrective exercises.
+// Stored in DB (not hardcoded in exercise-table.ts) so cues, sets/reps, and
+// video URLs can be updated via a DB query without a redeploy.
+// Seeded by prisma/seed.ts on first deploy.
+// =============================================================================
+
+enum PhaseType {
+  INHIBIT   // self-myofascial release (SMR) targeting overactive muscles
+  LENGTHEN  // static or neuromuscular stretch targeting overactive muscles
+  ACTIVATE  // isolated strengthening of underactive muscles
+  INTEGRATE // dynamic multi-joint movement patterns
+}
+
+model Exercise {
+  id      String @id @default(cuid())
+  nasmKey String @unique
+  // Stable identifier used by plan-builder.ts. Never change after seeding.
+  // Convention: {MUSCLE_GROUP}_{PHASE_ABBREV}
+  // e.g. "UPPER_TRAP_SMR", "PECT_MINOR_STRETCH", "DEEP_CERVICAL_FLEX_ISO"
+
+  name        String
+  description String   @db.Text // coaching cue shown to user during session
+  videoUrl    String?            // R2 key or external GIF — editable post-deploy
+
+  phaseType PhaseType
+
+  // Which dysfunction patterns include this exercise in their protocol.
+  // Stored as String[] (Postgres text[]); validated against DysfunctionType
+  // enum in application code (plan-builder.ts).
+  // e.g. ["UPPER_CROSSED", "NONE"]
+  dysfunctionTargets String[]
+
+  // Default prescription values — used verbatim by plan-builder.ts for MVP.
+  sets        Int?
+  reps        Int?
+  holdSeconds Int? // for SMR holds (30–60 s) and static stretches (20–30 s)
+
+  planExercises PlanExercise[]
+}
+
+// =============================================================================
+// EXERCISE PLAN
+//
+// One plan per user enforced by @unique on userId.
+// Generated deterministically from DysfunctionType + Goal[] by plan-builder.ts.
+// =============================================================================
+
+model ExercisePlan {
+  id           String     @id @default(cuid())
+  userId       String     @unique // one active plan per user
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assessmentId String     @unique
+  assessment   Assessment @relation(fields: [assessmentId], references: [id])
+  createdAt    DateTime   @default(now())
+
+  phases       Phase[]
+  workSessions WorkSession[]
+}
+
+// One Phase row per NASM phase type within a plan.
+// order field controls display sequence (1 INHIBIT → 2 LENGTHEN → 3 ACTIVATE → 4 INTEGRATE).
+model Phase {
+  id     String       @id @default(cuid())
+  planId String
+  plan   ExercisePlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  type   PhaseType
+  order  Int
+
+  exercises PlanExercise[]
+
+  @@index([planId, order])
+}
+
+// Junction table: links a Phase to its selected Exercises with display order.
+model PlanExercise {
+  id         String   @id @default(cuid())
+  phaseId    String
+  phase      Phase    @relation(fields: [phaseId], references: [id], onDelete: Cascade)
+  exerciseId String
+  exercise   Exercise @relation(fields: [exerciseId], references: [id])
+  order      Int
+
+  @@index([phaseId, order])
+}
+
+// =============================================================================
+// SCHEDULING
+//
+// WorkSession = one corrective exercise event on the user's calendar.
+// Table mapped to "work_sessions" to avoid SQL ambiguity with NextAuth's
+// "sessions" table. Prisma accessor is prisma.workSession (not prisma.session).
+// =============================================================================
+
+model WorkSession {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planId String
+  plan   ExercisePlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  scheduledAt  DateTime
+  durationMins Int      // 5–15 min — prioritise consistency over volume
+
+  // The specific subset of Exercise IDs assigned to THIS session, sized
+  // to fit durationMins. Each session carries its own slice of the full
+  // plan's exercise library rather than referencing all phases.
+  exerciseIds String[] @default([])
+
+  // Null until synced to Google Calendar.
+  googleEventId String?
+
+  // Pre-written adherence message shown in the GCal event description.
+  // Selected from lib/calendar/messages.ts based on Goal[] + DysfunctionType.
+  // No medical claims. Action-oriented, honest about time commitment.
+  message String
+
+  // Completion tracking — the primary beta success metric.
+  // Updated via "Mark complete" button on home screen or GCal event deep link.
+  completed   Boolean   @default(false)
+  completedAt DateTime?
+
+  @@index([userId, scheduledAt]) // session list queries + scheduler reads
+  @@index([userId, completed])   // completion rate calculation
+  @@map("work_sessions")
+}
