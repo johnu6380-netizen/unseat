@@ -1,0 +1,103 @@
+├── .env
+├── .gitignore
+├── AGENTS.md
+├── app/
+│   ├── api/
+│   │   ├── assessment/
+│   │   │   ├── preview/
+│   │   │   │   └── route.ts
+│   │   │   ├── route.ts
+│   │   │   └── upload/
+│   │   ├── auth/
+│   │   │   └── [...nextauth]/
+│   │   │       └── route.ts
+│   │   ├── availability/
+│   │   │   └── route.ts
+│   │   ├── calendar/
+│   │   ├── exercises/
+│   │   ├── onboarding/
+│   │   │   ├── availability/
+│   │   │   ├── goals/
+│   │   │   └── route.ts
+│   │   └── session/
+│   │       └── complete/
+│   │           └── route.ts
+│   ├── app/
+│   │   ├── assessment/
+│   │   │   └── questions/
+│   │   ├── plan/
+│   │   └── schedule/
+│   ├── assessment/
+│   │   ├── page.tsx
+│   │   └── preview/
+│   │       └── page.tsx
+│   ├── auth/
+│   │   └── login/
+│   ├── availability/
+│   │   └── page.tsx
+│   ├── consent/
+│   │   └── page.tsx
+│   ├── favicon.ico
+│   ├── globals.css
+│   ├── layout.tsx
+│   ├── login/
+│   │   └── page.tsx
+│   ├── onboarding/
+│   │   ├── assessment/
+│   │   │   └── page.tsx
+│   │   ├── availability/
+│   │   │   └── page.tsx
+│   │   ├── goals/
+│   │   └── page.tsx
+│   ├── page.tsx
+│   ├── privacy/
+│   │   └── page.tsx
+│   ├── schedule/
+│   │   └── page.tsx
+│   └── terms/
+│       └── page.tsx
+├── CLAUDE.md
+├── components/
+│   ├── assessment/
+│   │   ├── DiagnosisCard.tsx
+│   │   └── PlanPreview.tsx
+│   ├── legal/
+│   │   ├── ConsentCheckbox.tsx
+│   │   └── EmailLink.tsx
+│   └── onboarding/
+│       ├── AvailabilityGrid.tsx
+│       └── TimeInput12h.tsx
+├── eslint.config.mjs
+├── lib/
+│   ├── assessment/
+│   │   ├── buildPlanPreview.ts
+│   │   └── determineDysfunctions.ts
+│   ├── auth.ts
+│   ├── calendar/
+│   │   ├── buildEventDescription.ts
+│   │   ├── createEvent.ts
+│   │   └── syncWorkSessions.ts
+│   ├── db/
+│   │   └── index.ts
+│   ├── plan/
+│   │   └── buildExercisePlan.ts
+│   └── schedule/
+│       └── generateWorkSessions.ts
+├── next-env.d.ts
+├── next.config.ts
+├── package-lock.json
+├── package.json
+├── postcss.config.mjs
+├── prisma/
+│   ├── schema.prisma
+│   └── seed.ts
+├── public/
+│   ├── file.svg
+│   ├── globe.svg
+│   ├── next.svg
+│   ├── vercel.svg
+│   └── window.svg
+├── README.md
+├── tsconfig.json
+└── types/
+    └── next-auth.d.ts
